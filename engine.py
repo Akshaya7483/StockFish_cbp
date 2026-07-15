@@ -1,7 +1,9 @@
 import os
 import subprocess
 import threading
-
+import time
+from queue import Queue, Empty
+ENGINE_TIMEOUT = int(os.getenv("SF_TIMEOUT", "30"))
 
 class StockfishEngine:
     def __init__(self):
@@ -27,7 +29,15 @@ class StockfishEngine:
         self.lock = threading.Lock()
         self.current_multipv = 1
 
-        # Initialize UCI
+        # Queue for Stockfish output
+        self.output_queue = Queue()
+
+        # Background reader
+        threading.Thread(
+            target=self._reader,
+            daemon=True
+        ).start()
+
         self.initialize()
 
     # -------------------------
@@ -38,11 +48,26 @@ class StockfishEngine:
         self.process.stdin.write(command + "\n")
         self.process.stdin.flush()
 
+    def _reader(self):
+
+        try:
+            while True:
+
+                line = self.process.stdout.readline()
+
+                if not line:
+                    break
+
+                self.output_queue.put(line.strip())
+
+        finally:
+            self.output_queue.put(None)
+    
     def read_until(self, token: str):
         lines = []
 
         while True:
-            line = self.process.stdout.readline().strip()
+            line = self.read_line()
 
             if line:
                 lines.append(line)
@@ -51,7 +76,28 @@ class StockfishEngine:
                 break
 
         return lines
+    
+    def read_line(self, timeout=ENGINE_TIMEOUT):
 
+        if self.process.poll() is not None:
+            raise RuntimeError(
+                "Stockfish process exited unexpectedly."
+            )
+
+        try:
+            line = self.output_queue.get(timeout=timeout)
+
+            if line is None:
+                raise RuntimeError(
+                    "Stockfish reader thread stopped."
+                )
+
+            return line
+
+        except Empty:
+            raise TimeoutError(
+                f"Stockfish timed out after {timeout} seconds."
+            )
     # -------------------------
     # Engine initialization
     # -------------------------
@@ -88,7 +134,7 @@ class StockfishEngine:
 
             while True:
 
-                line = self.process.stdout.readline().strip()
+                line = self.read_line()
 
                 if line.startswith("info"):
 
@@ -145,7 +191,7 @@ class StockfishEngine:
 
             while True:
 
-                line = self.process.stdout.readline().strip()
+                line = self.read_line()
 
                 if line.startswith("info"):
 
@@ -235,7 +281,7 @@ class StockfishEngine:
             results = {}
 
             while True:
-                line = self.process.stdout.readline().strip()
+                line = self.read_line()
 
                 if line.startswith("info"):
 
