@@ -1,5 +1,31 @@
+# Python
 __pycache__/
-*.pyc
-.vscode/
+*.py[cod]
+*$py.class
+
+# Virtual environments
 .env
+.venv/
+venv/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build / distribution
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# Stockfish binaries
 stockfish-ubuntu-x86-64-avx2
+stockfish-windows-x86-64-avx2.exe
+stockfish*
