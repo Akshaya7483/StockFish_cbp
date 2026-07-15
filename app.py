@@ -29,3 +29,18 @@ def home():
         "engine": "Stockfish",
         "version": "17.1"
     }
+@app.get("/test-stockfish")
+def test_stockfish():
+    engine.stdin.write("uci\n")
+    engine.stdin.flush()
+
+    lines = []
+
+    while True:
+        line = engine.stdout.readline().strip()
+        lines.append(line)
+
+        if line == "uciok":
+            break
+
+    return {"output": lines}
