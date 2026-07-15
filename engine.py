@@ -6,12 +6,14 @@ import threading
 class StockfishEngine:
     def __init__(self):
 
+        # Select correct engine depending on OS
         if os.name == "nt":
             self.engine_path = "./stockfish-windows-x86-64-avx2.exe"
         else:
             self.engine_path = "./stockfish/stockfish-ubuntu-x86-64-avx2"
             os.chmod(self.engine_path, 0o755)
 
+        # Start Stockfish
         self.process = subprocess.Popen(
             [self.engine_path],
             stdin=subprocess.PIPE,
@@ -21,16 +23,21 @@ class StockfishEngine:
             bufsize=1,
         )
 
+        # Prevent concurrent requests from mixing stdout
         self.lock = threading.Lock()
 
+        # Initialize UCI
         self.initialize()
+
+    # -------------------------
+    # Low-level communication
+    # -------------------------
 
     def send(self, command: str):
         self.process.stdin.write(command + "\n")
         self.process.stdin.flush()
 
     def read_until(self, token: str):
-
         lines = []
 
         while True:
@@ -44,6 +51,10 @@ class StockfishEngine:
 
         return lines
 
+    # -------------------------
+    # Engine initialization
+    # -------------------------
+
     def initialize(self):
 
         self.send("uci")
@@ -56,6 +67,10 @@ class StockfishEngine:
         self.send("isready")
         self.read_until("readyok")
 
+    # -------------------------
+    # Best Move
+    # -------------------------
+
     def bestmove(self, fen: str, depth: int = 18):
 
         with self.lock:
@@ -64,17 +79,58 @@ class StockfishEngine:
             self.send(f"position fen {fen}")
             self.send(f"go depth {depth}")
 
+            cp = None
+            mate = None
+            pv = []
+
+            best_depth = 0
+
             while True:
 
                 line = self.process.stdout.readline().strip()
 
-                if line.startswith("bestmove"):
+                if line.startswith("info"):
+
+                    parts = line.split()
+
+                    if "depth" in parts:
+
+                        current_depth = int(parts[parts.index("depth") + 1])
+
+                        if current_depth >= best_depth:
+
+                            best_depth = current_depth
+
+                            if "score" in parts:
+
+                                idx = parts.index("score")
+
+                                if parts[idx + 1] == "cp":
+                                    cp = int(parts[idx + 2])
+
+                                elif parts[idx + 1] == "mate":
+                                    mate = int(parts[idx + 2])
+
+                            if "pv" in parts:
+
+                                pv_index = parts.index("pv")
+
+                                pv = parts[pv_index + 1:]
+
+                elif line.startswith("bestmove"):
 
                     return {
                         "bestmove": line.split()[1],
-                        "depth": depth
+                        "depth": best_depth,
+                        "cp": cp,
+                        "mate": mate,
+                        "pv": pv
                     }
-                
+
+    # -------------------------
+    # Shutdown
+    # -------------------------
+
     def stop(self):
         self.send("quit")
         self.process.terminate()
