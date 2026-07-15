@@ -201,6 +201,113 @@ class StockfishEngine:
                             for k in sorted(results.keys())
                         ]
                     }
+    
+    def analyze(
+        self,
+        fen: str,
+        depth: int | None = 18,
+        movetime: int | None = None,
+        multipv: int = 1,
+    ):
+
+        with self.lock:
+
+            # Configure MultiPV for this search
+            self.send(f"setoption name MultiPV value {multipv}")
+            self.send("isready")
+            self.read_until("readyok")
+
+            self.send("ucinewgame")
+            self.send(f"position fen {fen}")
+
+            if movetime is not None:
+                self.send(f"go movetime {movetime}")
+            else:
+                self.send(f"go depth {depth}")
+
+            results = {}
+
+            while True:
+
+                line = self.process.stdout.readline().strip()
+
+                if line.startswith("info"):
+
+                    parts = line.split()
+
+                    if "multipv" not in parts:
+                        continue
+
+                    rank = int(parts[parts.index("multipv") + 1])
+
+                    if rank not in results:
+
+                        results[rank] = {
+                            "rank": rank,
+                            "bestmove": None,
+                            "cp": None,
+                            "mate": None,
+                            "depth": 0,
+                            "seldepth": 0,
+                            "nodes": 0,
+                            "nps": 0,
+                            "time_ms": 0,
+                            "pv": [],
+                        }
+
+                    current = results[rank]
+
+                    if "depth" in parts:
+                        current["depth"] = int(parts[parts.index("depth") + 1])
+
+                    if "seldepth" in parts:
+                        current["seldepth"] = int(parts[parts.index("seldepth") + 1])
+
+                    if "nodes" in parts:
+                        current["nodes"] = int(parts[parts.index("nodes") + 1])
+
+                    if "nps" in parts:
+                        current["nps"] = int(parts[parts.index("nps") + 1])
+
+                    if "time" in parts:
+                        current["time_ms"] = int(parts[parts.index("time") + 1])
+
+                    if "score" in parts:
+
+                        idx = parts.index("score")
+
+                        if parts[idx + 1] == "cp":
+                            current["cp"] = int(parts[idx + 2])
+
+                        elif parts[idx + 1] == "mate":
+                            current["mate"] = int(parts[idx + 2])
+
+                    if "pv" in parts:
+
+                        pv_index = parts.index("pv")
+
+                        current["pv"] = parts[pv_index + 1:]
+
+                        if current["pv"]:
+                            current["bestmove"] = current["pv"][0]
+
+                elif line.startswith("bestmove"):
+
+                    # Restore default MultiPV
+                    self.send("setoption name MultiPV value 1")
+                    self.send("isready")
+                    self.read_until("readyok")
+
+                    return {
+                        "fen": fen,
+                        "requested_depth": depth,
+                        "requested_movetime": movetime,
+                        "multipv": multipv,
+                        "analysis": [
+                            results[k]
+                            for k in sorted(results.keys())
+                        ]
+                    }
     # -------------------------
     # Shutdown
     # -------------------------
