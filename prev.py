@@ -1,7 +1,15 @@
+import logging
 import os
 import subprocess
 import threading
+import time
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+logger = logging.getLogger(__name__)
 
 class StockfishEngine:
     def __init__(self):
@@ -28,6 +36,7 @@ class StockfishEngine:
 
         # Initialize UCI
         self.initialize()
+        self.max_search_time = 35  # seconds
 
     # -------------------------
     # Low-level communication
@@ -68,64 +77,179 @@ class StockfishEngine:
         self.read_until("readyok")
 
     # -------------------------
+# Engine Helpers
+# -------------------------
+
+    def configure_engine(
+        self,
+        multipv: int = 1,
+    ):
+
+        logger.info(f"Configuring engine (MultiPV={multipv})")
+
+        self.send(f"setoption name MultiPV value {multipv}")
+
+        self.send("isready")
+
+        self.read_until("readyok")
+
+
+    def prepare_position(
+        self,
+        fen: str,
+    ):
+
+        logger.info("Preparing position")
+
+        self.send("ucinewgame")
+
+        self.send(f"position fen {fen}")
+
+
+    def restore_defaults(self):
+
+        logger.info("Restoring engine defaults")
+
+        self.configure_engine(1)
+    
+       # -------------------------
+   
     # Best Move
     # -------------------------
-
     def bestmove(self, fen: str, depth: int = 18):
 
         with self.lock:
 
-            self.send("ucinewgame")
-            self.send(f"position fen {fen}")
-            self.send(f"go depth {depth}")
+            logger.info(f"Starting bestmove search (depth={depth})")
 
-            cp = None
-            mate = None
-            pv = []
+            try:
 
-            best_depth = 0
+                self.prepare_position(fen)
 
-            while True:
+                self.send(f"go depth {depth}")
 
-                line = self.process.stdout.readline().strip()
+                cp = None
+                mate = None
+                pv = []
 
-                if line.startswith("info"):
+                best_depth = 0
 
-                    parts = line.split()
+                while True:
 
-                    if "depth" in parts:
+                    line = self.process.stdout.readline().strip()
 
-                        current_depth = int(parts[parts.index("depth") + 1])
+                    if not line:
+                        continue
 
-                        if current_depth >= best_depth:
+                    if line.startswith("info"):
 
-                            best_depth = current_depth
+                        parts = line.split()
 
-                            if "score" in parts:
+                        if "depth" in parts:
 
-                                idx = parts.index("score")
+                            current_depth = int(parts[parts.index("depth") + 1])
 
-                                if parts[idx + 1] == "cp":
-                                    cp = int(parts[idx + 2])
+                            if current_depth >= best_depth:
 
-                                elif parts[idx + 1] == "mate":
-                                    mate = int(parts[idx + 2])
+                                best_depth = current_depth
 
-                            if "pv" in parts:
+                                if "score" in parts:
 
-                                pv_index = parts.index("pv")
+                                    idx = parts.index("score")
 
-                                pv = parts[pv_index + 1:]
+                                    if parts[idx + 1] == "cp":
+                                        cp = int(parts[idx + 2])
 
-                elif line.startswith("bestmove"):
+                                    elif parts[idx + 1] == "mate":
+                                        mate = int(parts[idx + 2])
 
-                    return {
-                        "bestmove": line.split()[1],
-                        "depth": best_depth,
-                        "cp": cp,
-                        "mate": mate,
-                        "pv": pv
-                    }
+                                if "pv" in parts:
+                                    pv_index = parts.index("pv")
+
+                                    full_pv = parts[pv_index + 1:]
+
+                                    if full_pv:
+                                        pv = full_pv[1:]
+
+                    elif line.startswith("bestmove"):
+
+                        move = line.split()[1]
+
+                        logger.info(
+                            f"Bestmove completed | move={move} | depth={best_depth} | cp={cp}"
+                        )
+
+                        return {
+                            "bestmove": move,
+                            "depth": best_depth,
+                            "cp": cp,
+                            "mate": mate,
+                            "pv": pv,
+                        }
+
+            except Exception:
+
+                logger.exception("bestmove() failed")
+
+                raise
+
+            finally:
+
+                self.restore_defaults()
+
+            with self.lock:
+
+                self.send("ucinewgame")
+                self.send(f"position fen {fen}")
+                self.send(f"go depth {depth}")
+
+                cp = None
+                mate = None
+                pv = []
+
+                best_depth = 0
+
+                while True:
+
+                    line = self.process.stdout.readline().strip()
+
+                    if line.startswith("info"):
+
+                        parts = line.split()
+
+                        if "depth" in parts:
+
+                            current_depth = int(parts[parts.index("depth") + 1])
+
+                            if current_depth >= best_depth:
+
+                                best_depth = current_depth
+
+                                if "score" in parts:
+
+                                    idx = parts.index("score")
+
+                                    if parts[idx + 1] == "cp":
+                                        cp = int(parts[idx + 2])
+
+                                    elif parts[idx + 1] == "mate":
+                                        mate = int(parts[idx + 2])
+
+                                if "pv" in parts:
+
+                                    pv_index = parts.index("pv")
+
+                                    pv = parts[pv_index + 1:]
+
+                    elif line.startswith("bestmove"):
+
+                        return {
+                            "bestmove": line.split()[1],
+                            "depth": best_depth,
+                            "cp": cp,
+                            "mate": mate,
+                            "pv": pv
+                        }
                 
     def multipv(self, fen: str, depth: int = 18, multipv: int = 3):
 
@@ -180,12 +304,14 @@ class StockfishEngine:
 
                         pv_index = parts.index("pv")
 
-                        pv = parts[pv_index + 1:]
+                        full_pv = parts[pv_index + 1:]
 
-                        results[rank]["pv"] = pv
-
-                        if len(pv):
-                            results[rank]["bestmove"] = pv[0]
+                        if full_pv:
+                            results[rank]["bestmove"] = full_pv[0]
+                            results[rank]["pv"] = full_pv[1:]
+                        else:
+                            results[rank]["bestmove"] = None
+                            results[rank]["pv"] = []
 
                 elif line.startswith("bestmove"):
 
@@ -205,7 +331,7 @@ class StockfishEngine:
     def analyze(
         self,
         fen: str,
-        depth: int | None = None,
+        depth: int | None = 18,
         movetime: int | None = None,
         multipv: int = 1,
     ):
@@ -221,24 +347,24 @@ class StockfishEngine:
             self.send(f"position fen {fen}")
 
             if movetime is not None:
-                print(f"DEBUG: Sending -> go movetime {movetime}")
+                logger.info(f"Sending command: go movetime {movetime}")
                 self.send(f"go movetime {movetime}")
             else:
-                print(f"DEBUG: Sending -> go depth {depth}")
-                go_command = "go"
-                if depth is not None:
-                    go_command += f" depth {depth}"
-
-                if movetime is not None:
-                    go_command += f" movetime {movetime}"
-
-                self.send(go_command)
+                logger.info(f"Sending command: go depth {depth}")
+                self.send(f"go depth {depth}")
 
             results = {}
+            start_time = time.monotonic()
 
             while True:
+                if time.monotonic() - start_time > self.max_search_time:
+                    logger.warning("Search timeout reached. Sending stop command.")
+                    self.send("stop")
+                    raise TimeoutError(
+                        "Stockfish search exceeded maximum allowed time."
+                    )
                 line = self.process.stdout.readline().strip()
-                print("ENGINE:", line)
+                logger.debug(line)
 
                 if line.startswith("info"):
 
@@ -295,10 +421,14 @@ class StockfishEngine:
 
                         pv_index = parts.index("pv")
 
-                        current["pv"] = parts[pv_index + 1:]
+                        full_pv = parts[pv_index + 1:]
 
-                        if current["pv"]:
-                            current["bestmove"] = current["pv"][0]
+                        if full_pv:
+                            current["bestmove"] = full_pv[0]
+                            current["pv"] = full_pv[1:]
+                        else:
+                            current["bestmove"] = None
+                            current["pv"] = []
 
                 elif line.startswith("bestmove"):
 
