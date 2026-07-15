@@ -221,15 +221,17 @@ class StockfishEngine:
             self.send(f"position fen {fen}")
 
             if movetime is not None:
+                print(f"DEBUG: Sending -> go movetime {movetime}")
                 self.send(f"go movetime {movetime}")
             else:
+                print(f"DEBUG: Sending -> go depth {depth}")
                 self.send(f"go depth {depth}")
 
             results = {}
 
             while True:
-
                 line = self.process.stdout.readline().strip()
+                print("ENGINE:", line)
 
                 if line.startswith("info"):
 
