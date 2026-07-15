@@ -1,7 +1,12 @@
 import os
 import subprocess
 from fastapi import FastAPI
+from pydantic import BaseModel
 
+class BestMoveRequest(BaseModel):
+    fen: str
+    depth: int = 18
+    
 if os.name == "nt":
     ENGINE_PATH = "./stockfish-windows-x86-64-avx2.exe"
 else:
@@ -30,17 +35,21 @@ def home():
         "version": "17.1"
     }
 @app.get("/test-stockfish")
-def test_stockfish():
-    engine.stdin.write("uci\n")
-    engine.stdin.flush()
 
-    lines = []
+@app.post("/bestmove")
+def bestmove(req: BestMoveRequest):
+
+    engine.stdin.write("ucinewgame\n")
+    engine.stdin.write(f"position fen {req.fen}\n")
+    engine.stdin.write(f"go depth {req.depth}\n")
+    engine.stdin.flush()
 
     while True:
         line = engine.stdout.readline().strip()
-        lines.append(line)
 
-        if line == "uciok":
-            break
-
-    return {"output": lines}
+        if line.startswith("bestmove"):
+            return {
+                "fen": req.fen,
+                "depth": req.depth,
+                "bestmove": line.split()[1]
+            }
