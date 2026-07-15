@@ -164,10 +164,12 @@ class StockfishEngine:
                                         mate = int(parts[idx + 2])
 
                                 if "pv" in parts:
-
                                     pv_index = parts.index("pv")
 
-                                    pv = parts[pv_index + 1:]
+                                    full_pv = parts[pv_index + 1:]
+
+                                    if full_pv:
+                                        pv = full_pv[1:]
 
                     elif line.startswith("bestmove"):
 
@@ -302,12 +304,14 @@ class StockfishEngine:
 
                         pv_index = parts.index("pv")
 
-                        pv = parts[pv_index + 1:]
+                        full_pv = parts[pv_index + 1:]
 
-                        results[rank]["pv"] = pv
-
-                        if len(pv):
-                            results[rank]["bestmove"] = pv[0]
+                        if full_pv:
+                            results[rank]["bestmove"] = full_pv[0]
+                            results[rank]["pv"] = full_pv[1:]
+                        else:
+                            results[rank]["bestmove"] = None
+                            results[rank]["pv"] = []
 
                 elif line.startswith("bestmove"):
 
@@ -417,10 +421,14 @@ class StockfishEngine:
 
                         pv_index = parts.index("pv")
 
-                        current["pv"] = parts[pv_index + 1:]
+                        full_pv = parts[pv_index + 1:]
 
-                        if current["pv"]:
-                            current["bestmove"] = current["pv"][0]
+                        if full_pv:
+                            current["bestmove"] = full_pv[0]
+                            current["pv"] = full_pv[1:]
+                        else:
+                            current["bestmove"] = None
+                            current["pv"] = []
 
                 elif line.startswith("bestmove"):
 
