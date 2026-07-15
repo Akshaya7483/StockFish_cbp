@@ -126,7 +126,81 @@ class StockfishEngine:
                         "mate": mate,
                         "pv": pv
                     }
+                
+    def multipv(self, fen: str, depth: int = 18, multipv: int = 3):
 
+        with self.lock:
+
+            self.send(f"setoption name MultiPV value {multipv}")
+            self.send("isready")
+            self.read_until("readyok")
+
+            self.send("ucinewgame")
+            self.send(f"position fen {fen}")
+            self.send(f"go depth {depth}")
+
+            results = {}
+
+            while True:
+
+                line = self.process.stdout.readline().strip()
+
+                if line.startswith("info"):
+
+                    parts = line.split()
+
+                    if "multipv" not in parts:
+                        continue
+
+                    rank = int(parts[parts.index("multipv") + 1])
+
+                    if rank not in results:
+                        results[rank] = {
+                            "rank": rank,
+                            "cp": None,
+                            "mate": None,
+                            "pv": [],
+                            "depth": 0
+                        }
+
+                    if "depth" in parts:
+                        results[rank]["depth"] = int(parts[parts.index("depth") + 1])
+
+                    if "score" in parts:
+
+                        idx = parts.index("score")
+
+                        if parts[idx + 1] == "cp":
+                            results[rank]["cp"] = int(parts[idx + 2])
+
+                        elif parts[idx + 1] == "mate":
+                            results[rank]["mate"] = int(parts[idx + 2])
+
+                    if "pv" in parts:
+
+                        pv_index = parts.index("pv")
+
+                        pv = parts[pv_index + 1:]
+
+                        results[rank]["pv"] = pv
+
+                        if len(pv):
+                            results[rank]["bestmove"] = pv[0]
+
+                elif line.startswith("bestmove"):
+
+                    self.send("setoption name MultiPV value 1")
+                    self.send("isready")
+                    self.read_until("readyok")
+
+                    return {
+                        "depth": depth,
+                        "multipv": multipv,
+                        "moves": [
+                            results[k]
+                            for k in sorted(results.keys())
+                        ]
+                    }
     # -------------------------
     # Shutdown
     # -------------------------

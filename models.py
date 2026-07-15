@@ -10,7 +10,6 @@ class EvaluateRequest(BaseModel):
     fen: str
     depth: int = 18
 
-
 class MultiPVRequest(BaseModel):
     fen: str
     depth: int = 18
