@@ -1,7 +1,15 @@
+import logging
 import os
 import subprocess
 import threading
+import time
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+logger = logging.getLogger(__name__)
 
 class StockfishEngine:
     def __init__(self):
@@ -28,6 +36,7 @@ class StockfishEngine:
 
         # Initialize UCI
         self.initialize()
+        self.max_search_time = 35  # seconds
 
     # -------------------------
     # Low-level communication
@@ -68,9 +77,45 @@ class StockfishEngine:
         self.read_until("readyok")
 
     # -------------------------
+# Engine Helpers
+# -------------------------
+
+    def configure_engine(
+        self,
+        multipv: int = 1,
+    ):
+
+        logger.info(f"Configuring engine (MultiPV={multipv})")
+
+        self.send(f"setoption name MultiPV value {multipv}")
+
+        self.send("isready")
+
+        self.read_until("readyok")
+
+
+    def prepare_position(
+        self,
+        fen: str,
+    ):
+
+        logger.info("Preparing position")
+
+        self.send("ucinewgame")
+
+        self.send(f"position fen {fen}")
+
+
+    def restore_defaults(self):
+
+        logger.info("Restoring engine defaults")
+
+        self.configure_engine(1)
+    
+       # -------------------------
+   
     # Best Move
     # -------------------------
-
     def bestmove(self, fen: str, depth: int = 18):
 
         with self.lock:
@@ -221,17 +266,24 @@ class StockfishEngine:
             self.send(f"position fen {fen}")
 
             if movetime is not None:
-                print(f"DEBUG: Sending -> go movetime {movetime}")
+                logger.info(f"Sending command: go movetime {movetime}")
                 self.send(f"go movetime {movetime}")
             else:
-                print(f"DEBUG: Sending -> go depth {depth}")
+                logger.info(f"Sending command: go depth {depth}")
                 self.send(f"go depth {depth}")
 
             results = {}
+            start_time = time.monotonic()
 
             while True:
+                if time.monotonic() - start_time > self.max_search_time:
+                    logger.warning("Search timeout reached. Sending stop command.")
+                    self.send("stop")
+                    raise TimeoutError(
+                        "Stockfish search exceeded maximum allowed time."
+                    )
                 line = self.process.stdout.readline().strip()
-                print("ENGINE:", line)
+                logger.debug(line)
 
                 if line.startswith("info"):
 
