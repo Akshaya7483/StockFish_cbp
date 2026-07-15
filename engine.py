@@ -25,6 +25,7 @@ class StockfishEngine:
 
         # Prevent concurrent requests from mixing stdout
         self.lock = threading.Lock()
+        self.current_multipv = 1
 
         # Initialize UCI
         self.initialize()
@@ -130,10 +131,11 @@ class StockfishEngine:
     def multipv(self, fen: str, depth: int = 18, multipv: int = 3):
 
         with self.lock:
-
-            self.send(f"setoption name MultiPV value {multipv}")
-            self.send("isready")
-            self.read_until("readyok")
+            if multipv != self.current_multipv:
+                self.send(f"setoption name MultiPV value {multipv}")
+                self.send("isready")
+                self.read_until("readyok")
+                self.current_multipv = multipv
 
             self.send("ucinewgame")
             self.send(f"position fen {fen}")
@@ -189,10 +191,6 @@ class StockfishEngine:
 
                 elif line.startswith("bestmove"):
 
-                    self.send("setoption name MultiPV value 1")
-                    self.send("isready")
-                    self.read_until("readyok")
-
                     return {
                         "depth": depth,
                         "multipv": multipv,
@@ -213,18 +211,18 @@ class StockfishEngine:
         with self.lock:
 
             # Configure MultiPV for this search
-            self.send(f"setoption name MultiPV value {multipv}")
-            self.send("isready")
-            self.read_until("readyok")
+            if multipv != self.current_multipv:
+                self.send(f"setoption name MultiPV value {multipv}")
+                self.send("isready")
+                self.read_until("readyok")
+                self.current_multipv = multipv
 
             self.send("ucinewgame")
             self.send(f"position fen {fen}")
 
             if movetime is not None:
-                print(f"DEBUG: Sending -> go movetime {movetime}")
                 self.send(f"go movetime {movetime}")
             else:
-                print(f"DEBUG: Sending -> go depth {depth}")
                 go_command = "go"
                 if depth is not None:
                     go_command += f" depth {depth}"
@@ -238,7 +236,6 @@ class StockfishEngine:
 
             while True:
                 line = self.process.stdout.readline().strip()
-                print("ENGINE:", line)
 
                 if line.startswith("info"):
 
@@ -301,11 +298,6 @@ class StockfishEngine:
                             current["bestmove"] = current["pv"][0]
 
                 elif line.startswith("bestmove"):
-
-                    # Restore default MultiPV
-                    self.send("setoption name MultiPV value 1")
-                    self.send("isready")
-                    self.read_until("readyok")
 
                     return {
                         "fen": fen,
