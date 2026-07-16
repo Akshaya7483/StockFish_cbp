@@ -42,3 +42,9 @@ class AnalyzeRequest(BaseModel):
             self.current_fen = self.fen
 
         return self
+    
+class AnalyzeGameRequest(BaseModel):
+    pgn: str
+    depth: int | None = None
+    movetime: int | None = None
+    multipv: int = 3

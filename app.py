@@ -1,15 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from engine import StockfishEngine
 from validators import validate_request
+from game_analyzer import GameAnalyzer
 from models import (
     BestMoveRequest,
     MultiPVRequest,
     AnalyzeRequest,
+    AnalyzeGameRequest,
 )
 
 app = FastAPI()
 
 engine = StockfishEngine()
+game_analyzer = GameAnalyzer(engine)
 
 # -------------------------------------
 # Engine Call Wrapper
@@ -128,3 +131,14 @@ def stats():
 @app.get("/health")
 def health():
     return engine.health()
+
+@app.post("/analyze-game")
+def analyze_game(req: AnalyzeGameRequest):
+
+    return engine_call(
+        game_analyzer.analyze_game,
+        pgn=req.pgn,
+        depth=req.depth,
+        movetime=req.movetime,
+        multipv=req.multipv,
+    )
