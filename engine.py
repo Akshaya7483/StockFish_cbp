@@ -168,10 +168,13 @@ class StockfishEngine:
 
         self.send("uci")
         self.read_until("uciok")
+        self.threads = 1
+        self.hash_mb = 256
+        self.default_multipv = 1
 
-        self.send("setoption name Threads value 1")
-        self.send("setoption name Hash value 256")
-        self.send("setoption name MultiPV value 1")
+        self.send(f"setoption name Threads value {self.threads}")
+        self.send(f"setoption name Hash value {self.hash_mb}")
+        self.send(f"setoption name MultiPV value {self.default_multipv}")
 
         self.send("isready")
         self.read_until("readyok")
@@ -183,6 +186,9 @@ class StockfishEngine:
             "status": "healthy" if running else "unhealthy",
             "engine_running": running,
             "pid": self.process.pid if running else None,
+            "threads": self.threads,
+            "hash_mb": self.hash_mb,
+
             "cache_entries": len(self.cache.cache),
             "uptime_seconds": int(time.time() - self.start_time),
         }
@@ -542,6 +548,10 @@ class StockfishEngine:
             "status": "online",
             "engine": "Stockfish 18.1",
             "uptime_seconds": uptime,
+            "threads": self.threads,
+            "hash_mb": self.hash_mb,
+            "default_multipv": self.default_multipv,
+
 
             "requests": {
                 "total": self.total_requests,
