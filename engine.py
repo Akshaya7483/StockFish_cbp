@@ -1,3 +1,4 @@
+from cache import AnalysisCache
 import os
 import subprocess
 import threading
@@ -5,6 +6,8 @@ import time
 from queue import Queue, Empty
 ENGINE_TIMEOUT = int(os.getenv("SF_TIMEOUT", "30"))
 from utils import win_probability
+FIRST_MOVE_DEPTH = 10
+FIRST_MOVE_TIME = 200
 class StockfishEngine:
     def __init__(self):
 
@@ -28,6 +31,7 @@ class StockfishEngine:
         # Prevent concurrent requests from mixing stdout
         self.lock = threading.Lock()
         self.current_multipv = 1
+        self.cache = AnalysisCache(max_size=500)
 
         # Queue for Stockfish output
         self.output_queue = Queue()
@@ -247,7 +251,6 @@ class StockfishEngine:
                         continue
 
                     rank = int(parts[parts.index("multipv") + 1])
-
                     if rank not in results:
                         results[rank] = {
                             "rank": rank,
@@ -259,34 +262,23 @@ class StockfishEngine:
 
                     if "depth" in parts:
                         results[rank]["depth"] = int(parts[parts.index("depth") + 1])
-
                     if "score" in parts:
-
                         idx = parts.index("score")
-
                         if parts[idx + 1] == "cp":
                             results[rank]["cp"] = int(parts[idx + 2])
-
                         elif parts[idx + 1] == "mate":
                             results[rank]["mate"] = int(parts[idx + 2])
 
                     if "pv" in parts:
-
                         pv_index = parts.index("pv")
-
                         pv = parts[pv_index + 1:]
-
                         results[rank]["pv"] = pv
-
                         if len(pv):
                             results[rank]["bestmove"] = pv[0]
 
                 elif line.startswith("bestmove"):
-
                     parts = line.split()
-
                     bestmove = parts[1]
-
                     ponder = None
 
                     if "ponder" in parts:
@@ -311,47 +303,45 @@ class StockfishEngine:
         movetime: int | None = None,
         multipv: int = 1,
     ):
-
         with self.lock:
-
+            cache_key = (
+                current_fen,
+                previous_fen,
+                depth,
+                movetime,
+                multipv
+            )
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                print("CACHE HIT")
+                return cached
+            print("CACHE MISS")
             # Configure MultiPV for this search
             if multipv != self.current_multipv:
                 self.send(f"setoption name MultiPV value {multipv}")
                 self.send("isready")
                 self.read_until("readyok")
                 self.current_multipv = multipv
-
             self.send("ucinewgame")
             self.send(f"position fen {current_fen}")
-
             if movetime is not None:
                 self.send(f"go movetime {movetime}")
             else:
                 go_command = "go"
                 if depth is not None:
                     go_command += f" depth {depth}"
-
                 if movetime is not None:
                     go_command += f" movetime {movetime}"
-
                 self.send(go_command)
-
             results = {}
-
             while True:
                 line = self.read_line()
-
                 if line.startswith("info"):
-
                     parts = line.split()
-
                     if "multipv" not in parts:
                         continue
-
                     rank = int(parts[parts.index("multipv") + 1])
-
                     if rank not in results:
-
                         results[rank] = {
                             "rank": rank,
                             "bestmove": None,
@@ -364,78 +354,48 @@ class StockfishEngine:
                             "time_ms": 0,
                             "pv": [],
                         }
-
                     current = results[rank]
-
                     if "depth" in parts:
                         current["depth"] = int(parts[parts.index("depth") + 1])
-
                     if "seldepth" in parts:
                         current["seldepth"] = int(parts[parts.index("seldepth") + 1])
-
                     if "nodes" in parts:
                         current["nodes"] = int(parts[parts.index("nodes") + 1])
-
                     if "nps" in parts:
                         current["nps"] = int(parts[parts.index("nps") + 1])
-
                     if "time" in parts:
                         current["time_ms"] = int(parts[parts.index("time") + 1])
-
                     if "score" in parts:
-
                         idx = parts.index("score")
-
                         if parts[idx + 1] == "cp":
                             current["cp"] = int(parts[idx + 2])
-
                         elif parts[idx + 1] == "mate":
                             current["mate"] = int(parts[idx + 2])
-
                     if "pv" in parts:
-
                         pv_index = parts.index("pv")
-
                         current["pv"] = parts[pv_index + 1:]
-
                         if current["pv"]:
-
                             current["bestmove"] = current["pv"][0]
-
                             current["first_move_score"] = None
-
                 elif line.startswith("bestmove"):
-
                     parts = line.split()
-
                     bestmove = parts[1]
-
                     ponder = None
-
                     if "ponder" in parts:
                         ponder = parts[parts.index("ponder") + 1]
                     previous_bestmove = None
-
                     if previous_fen:
-
                         self.send("ucinewgame")
                         self.send(f"position fen {previous_fen}")
-
                         if movetime is not None:
                             self.send(f"go movetime {movetime}")
                         else:
                             self.send(f"go depth {depth or 18}")
-
                         while True:
-
                             prev = self.read_line()
-
                             if prev.startswith("bestmove"):
-
                                 prev_parts = prev.split()
-
                                 previous_bestmove = prev_parts[1]
-
                                 break
                     for rank in sorted(results.keys()):
                         move = results[rank].get("bestmove")
@@ -443,11 +403,10 @@ class StockfishEngine:
                             results[rank]["first_move_score"] = self.evaluate_first_move(
                                 current_fen,
                                 move,
-                                depth=10,
-                                movetime=200
+                                depth=FIRST_MOVE_DEPTH,
+                                movetime=FIRST_MOVE_TIME,
                             )
-                            
-                    return {
+                    response = {
                         "fen": current_fen,
                         "bestmove": bestmove,
                         "ponder": ponder,
@@ -464,7 +423,8 @@ class StockfishEngine:
                             for k in sorted(results.keys())
                         ]
                     }
-                
+                    self.cache.set(cache_key, response)
+                    return response
 
     def evaluate_first_move(
         self,
@@ -476,38 +436,25 @@ class StockfishEngine:
         """
         Evaluate the position after making one move.
         """
-
         self.send("ucinewgame")
         self.send(f"position fen {fen} moves {move}")
-
         if movetime is not None:
             self.send(f"go movetime {movetime}")
         else:
             self.send(f"go depth {depth or 18}")
-
         cp = None
         mate = None
-
         while True:
-
             line = self.read_line()
-
             if line.startswith("info"):
-
                 parts = line.split()
-
                 if "score" in parts:
-
                     idx = parts.index("score")
-
                     if parts[idx + 1] == "cp":
                         cp = int(parts[idx + 2])
-
                     elif parts[idx + 1] == "mate":
                         mate = int(parts[idx + 2])
-
             elif line.startswith("bestmove"):
-
                 return {
                     "cp": cp,
                     "mate": mate
