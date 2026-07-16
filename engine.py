@@ -399,7 +399,10 @@ class StockfishEngine:
                         current["pv"] = parts[pv_index + 1:]
 
                         if current["pv"]:
+
                             current["bestmove"] = current["pv"][0]
+
+                            current["first_move_score"] = None
 
                 elif line.startswith("bestmove"):
 
@@ -434,7 +437,16 @@ class StockfishEngine:
                                 previous_bestmove = prev_parts[1]
 
                                 break
-
+                    for rank in sorted(results.keys()):
+                        move = results[rank].get("bestmove")
+                        if move:
+                            results[rank]["first_move_score"] = self.evaluate_first_move(
+                                current_fen,
+                                move,
+                                depth=10,
+                                movetime=200
+                            )
+                            
                     return {
                         "fen": current_fen,
                         "bestmove": bestmove,
@@ -452,6 +464,54 @@ class StockfishEngine:
                             for k in sorted(results.keys())
                         ]
                     }
+                
+
+    def evaluate_first_move(
+        self,
+        fen: str,
+        move: str,
+        depth: int | None = None,
+        movetime: int | None = None,
+    ):
+        """
+        Evaluate the position after making one move.
+        """
+
+        self.send("ucinewgame")
+        self.send(f"position fen {fen} moves {move}")
+
+        if movetime is not None:
+            self.send(f"go movetime {movetime}")
+        else:
+            self.send(f"go depth {depth or 18}")
+
+        cp = None
+        mate = None
+
+        while True:
+
+            line = self.read_line()
+
+            if line.startswith("info"):
+
+                parts = line.split()
+
+                if "score" in parts:
+
+                    idx = parts.index("score")
+
+                    if parts[idx + 1] == "cp":
+                        cp = int(parts[idx + 2])
+
+                    elif parts[idx + 1] == "mate":
+                        mate = int(parts[idx + 2])
+
+            elif line.startswith("bestmove"):
+
+                return {
+                    "cp": cp,
+                    "mate": mate
+                }
     # -------------------------
     # Shutdown
     # -------------------------
