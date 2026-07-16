@@ -171,6 +171,23 @@ class StockfishEngine:
     def bestmove(self, fen: str, depth: int = 18):
 
         with self.lock:
+            cache_key = (
+                "bestmove",
+                fen,
+                depth
+            )
+
+            cached = self.cache.get(cache_key)
+
+            if cached is not None:
+                print("BESTMOVE CACHE HIT")
+
+                cached = cached.copy()
+                cached["cached"] = True
+
+                return cached
+
+            print("BESTMOVE CACHE MISS")
 
             self.send("ucinewgame")
             self.send(f"position fen {fen}")
@@ -215,41 +232,53 @@ class StockfishEngine:
                     if "ponder" in parts:
                         ponder = parts[parts.index("ponder") + 1]
                         
-                    return {
+                    response = {
                         "bestmove": bestmove,
                         "ponder": ponder,
                         "depth": best_depth,
                         "cp": cp,
                         "mate": mate,
                         "win_probability": win_probability(cp, mate),
-                        "pv": pv
+                        "pv": pv,
+                        "cached": False
                     }
+                    self.cache.set(cache_key, response)
+                    return response
             
     def multipv(self, fen: str, depth: int = 18, multipv: int = 3):
         with self.lock:
+            cache_key = (
+                "multipv",
+                fen,
+                depth,
+                multipv
+            )
+            cached = self.cache.get(cache_key)
+
+            if cached is not None:
+                print("MULTIPV CACHE HIT")
+
+                cached = cached.copy()
+                cached["cached"] = True
+
+                return cached
+
+            print("MULTIPV CACHE MISS")
             if multipv != self.current_multipv:
                 self.send(f"setoption name MultiPV value {multipv}")
                 self.send("isready")
                 self.read_until("readyok")
                 self.current_multipv = multipv
-
             self.send("ucinewgame")
             self.send(f"position fen {fen}")
             self.send(f"go depth {depth}")
-
             results = {}
-
             while True:
-
                 line = self.read_line()
-
                 if line.startswith("info"):
-
                     parts = line.split()
-
                     if "multipv" not in parts:
                         continue
-
                     rank = int(parts[parts.index("multipv") + 1])
                     if rank not in results:
                         results[rank] = {
@@ -259,7 +288,6 @@ class StockfishEngine:
                             "pv": [],
                             "depth": 0
                         }
-
                     if "depth" in parts:
                         results[rank]["depth"] = int(parts[parts.index("depth") + 1])
                     if "score" in parts:
@@ -284,7 +312,7 @@ class StockfishEngine:
                     if "ponder" in parts:
                         ponder = parts[parts.index("ponder") + 1]
 
-                    return {
+                    response = {
                         "bestmove": bestmove,
                         "ponder": ponder,
                         "depth": depth,
@@ -292,8 +320,11 @@ class StockfishEngine:
                         "moves": [
                             results[k]
                             for k in sorted(results.keys())
-                        ]
+                        ],
+                        "cached": False
                     }
+                    self.cache.set(cache_key, response)
+                    return response
     
     def analyze(
         self,
@@ -305,6 +336,7 @@ class StockfishEngine:
     ):
         with self.lock:
             cache_key = (
+                "analyze",
                 current_fen,
                 previous_fen,
                 depth,
@@ -315,9 +347,9 @@ class StockfishEngine:
             if cached is not None:
                 cached = cached.copy()
                 cached["cached"] = True
-                print("CACHE HIT")
+                print("ANALYZE CACHE HIT")
                 return cached
-            print("CACHE MISS")
+            print("ANALYZE CACHE MISS")
             # Configure MultiPV for this search
             if multipv != self.current_multipv:
                 self.send(f"setoption name MultiPV value {multipv}")
@@ -423,9 +455,9 @@ class StockfishEngine:
                         "analysis": [
                             results[k]
                             for k in sorted(results.keys())
-                        ]
+                        ],
+                        "cached": False
                     }
-                    response["cached"] = False
                     self.cache.set(cache_key, response)
                     return response
 
