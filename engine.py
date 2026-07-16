@@ -210,6 +210,7 @@ class StockfishEngine:
                     ponder = None
                     if "ponder" in parts:
                         ponder = parts[parts.index("ponder") + 1]
+                        
                     return {
                         "bestmove": bestmove,
                         "ponder": ponder,
@@ -304,7 +305,8 @@ class StockfishEngine:
     
     def analyze(
         self,
-        fen: str,
+        current_fen: str,
+        previous_fen: str | None = None,
         depth: int | None = None,
         movetime: int | None = None,
         multipv: int = 1,
@@ -320,7 +322,7 @@ class StockfishEngine:
                 self.current_multipv = multipv
 
             self.send("ucinewgame")
-            self.send(f"position fen {fen}")
+            self.send(f"position fen {current_fen}")
 
             if movetime is not None:
                 self.send(f"go movetime {movetime}")
@@ -409,11 +411,35 @@ class StockfishEngine:
 
                     if "ponder" in parts:
                         ponder = parts[parts.index("ponder") + 1]
+                    previous_bestmove = None
+
+                    if previous_fen:
+
+                        self.send("ucinewgame")
+                        self.send(f"position fen {previous_fen}")
+
+                        if movetime is not None:
+                            self.send(f"go movetime {movetime}")
+                        else:
+                            self.send(f"go depth {depth or 18}")
+
+                        while True:
+
+                            prev = self.read_line()
+
+                            if prev.startswith("bestmove"):
+
+                                prev_parts = prev.split()
+
+                                previous_bestmove = prev_parts[1]
+
+                                break
 
                     return {
-                        "fen": fen,
+                        "fen": current_fen,
                         "bestmove": bestmove,
                         "ponder": ponder,
+                        "previous_fen_bestmove": previous_bestmove,
                         "requested_depth": depth,
                         "requested_movetime": movetime,
                         "multipv": multipv,

@@ -94,7 +94,8 @@ def analyze(req: AnalyzeRequest):
     )
 
     return engine.analyze(
-        fen=req.fen,
+        current_fen=req.current_fen,
+        previous_fen=req.previous_fen,
         depth=req.depth,
         movetime=req.movetime,
         multipv=req.multipv,
