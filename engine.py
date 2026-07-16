@@ -120,6 +120,8 @@ class StockfishEngine:
             return line
 
         except Empty:
+            self.restart()
+
             raise TimeoutError(
                 f"Stockfish timed out after {timeout} seconds."
             )

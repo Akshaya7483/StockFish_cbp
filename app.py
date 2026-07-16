@@ -1,8 +1,6 @@
 from fastapi import FastAPI, HTTPException
-
 from engine import StockfishEngine
 from validators import validate_request
-
 from models import (
     BestMoveRequest,
     MultiPVRequest,
@@ -12,6 +10,26 @@ from models import (
 app = FastAPI()
 
 engine = StockfishEngine()
+
+# -------------------------------------
+# Engine Call Wrapper
+# -------------------------------------
+
+def engine_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+
+    except TimeoutError as e:
+        raise HTTPException(
+        status_code=504,
+        detail=str(e)
+        )
+
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 
 # -------------------------------------
@@ -47,13 +65,13 @@ def home():
 
 @app.post("/bestmove")
 def best_move(req: BestMoveRequest):
-
     validate_or_raise(
         fen=req.fen,
         depth=req.depth
     )
 
-    return engine.bestmove(
+    return engine_call(
+        engine.bestmove,
         req.fen,
         req.depth
     )
@@ -72,7 +90,8 @@ def multipv(req: MultiPVRequest):
         multipv=req.multipv
     )
 
-    return engine.multipv(
+    return engine_call(
+        engine.multipv,
         req.fen,
         req.depth,
         req.multipv
@@ -93,7 +112,8 @@ def analyze(req: AnalyzeRequest):
         movetime=req.movetime
     )
 
-    return engine.analyze(
+    return engine_call(
+        engine.analyze,
         current_fen=req.current_fen,
         previous_fen=req.previous_fen,
         depth=req.depth,
