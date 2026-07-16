@@ -197,31 +197,29 @@ class StockfishEngine:
                             if "score" in parts:
 
                                 idx = parts.index("score")
-
                                 if parts[idx + 1] == "cp":
                                     cp = int(parts[idx + 2])
-
                                 elif parts[idx + 1] == "mate":
                                     mate = int(parts[idx + 2])
-
                             if "pv" in parts:
-
                                 pv_index = parts.index("pv")
-
                                 pv = parts[pv_index + 1:]
-
                 elif line.startswith("bestmove"):
-
+                    parts = line.split()
+                    bestmove = parts[1]
+                    ponder = None
+                    if "ponder" in parts:
+                        ponder = parts[parts.index("ponder") + 1]
                     return {
-                        "bestmove": line.split()[1],
+                        "bestmove": bestmove,
+                        "ponder": ponder,
                         "depth": best_depth,
                         "cp": cp,
                         "mate": mate,
                         "pv": pv
                     }
-                
+            
     def multipv(self, fen: str, depth: int = 18, multipv: int = 3):
-
         with self.lock:
             if multipv != self.current_multipv:
                 self.send(f"setoption name MultiPV value {multipv}")
@@ -283,7 +281,18 @@ class StockfishEngine:
 
                 elif line.startswith("bestmove"):
 
+                    parts = line.split()
+
+                    bestmove = parts[1]
+
+                    ponder = None
+
+                    if "ponder" in parts:
+                        ponder = parts[parts.index("ponder") + 1]
+
                     return {
+                        "bestmove": bestmove,
+                        "ponder": ponder,
                         "depth": depth,
                         "multipv": multipv,
                         "moves": [
@@ -391,8 +400,19 @@ class StockfishEngine:
 
                 elif line.startswith("bestmove"):
 
+                    parts = line.split()
+
+                    bestmove = parts[1]
+
+                    ponder = None
+
+                    if "ponder" in parts:
+                        ponder = parts[parts.index("ponder") + 1]
+
                     return {
                         "fen": fen,
+                        "bestmove": bestmove,
+                        "ponder": ponder,
                         "requested_depth": depth,
                         "requested_movetime": movetime,
                         "multipv": multipv,
