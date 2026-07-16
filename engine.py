@@ -313,6 +313,8 @@ class StockfishEngine:
             )
             cached = self.cache.get(cache_key)
             if cached is not None:
+                cached = cached.copy()
+                cached["cached"] = True
                 print("CACHE HIT")
                 return cached
             print("CACHE MISS")
@@ -423,6 +425,7 @@ class StockfishEngine:
                             for k in sorted(results.keys())
                         ]
                     }
+                    response["cached"] = False
                     self.cache.set(cache_key, response)
                     return response
 
