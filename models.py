@@ -17,6 +17,6 @@ class MultiPVRequest(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     fen: str
-    depth: int | None = 18
+    depth: int | None = None
     movetime: int | None = None
     multipv: int = 1
