@@ -120,3 +120,11 @@ def analyze(req: AnalyzeRequest):
         movetime=req.movetime,
         multipv=req.multipv,
     )
+
+@app.get("/stats")
+def stats():
+    return engine.stats()
+
+@app.get("/health")
+def health():
+    return engine.health()

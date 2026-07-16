@@ -176,6 +176,16 @@ class StockfishEngine:
         self.send("isready")
         self.read_until("readyok")
 
+    def health(self):
+        running = self.process.poll() is None
+
+        return {
+            "status": "healthy" if running else "unhealthy",
+            "engine_running": running,
+            "pid": self.process.pid if running else None,
+            "cache_entries": len(self.cache.cache),
+            "uptime_seconds": int(time.time() - self.start_time),
+        }
     # -------------------------
     # Best Move
     # -------------------------
@@ -516,6 +526,37 @@ class StockfishEngine:
                     "cp": cp,
                     "mate": mate
                 }
+   
+    def stats(self):
+
+        uptime = int(time.time() - self.start_time)
+
+        total_cache = self.cache_hits + self.cache_misses
+
+        hit_rate = (
+            round(self.cache_hits * 100 / total_cache, 2)
+            if total_cache else 0
+        )
+
+        return {
+            "status": "online",
+            "engine": "Stockfish 18.1",
+            "uptime_seconds": uptime,
+
+            "requests": {
+                "total": self.total_requests,
+                "bestmove": self.bestmove_requests,
+                "multipv": self.multipv_requests,
+                "analyze": self.analyze_requests,
+            },
+
+            "cache": {
+                "entries": len(self.cache.cache),
+                "hits": self.cache_hits,
+                "misses": self.cache_misses,
+                "hit_rate": hit_rate
+            }
+        }
     # -------------------------
     # Shutdown
     # -------------------------
