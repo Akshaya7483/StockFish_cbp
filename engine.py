@@ -32,6 +32,16 @@ class StockfishEngine:
         self.lock = threading.Lock()
         self.current_multipv = 1
         self.cache = AnalysisCache(max_size=500)
+        # Statistics
+        self.start_time = time.time()
+
+        self.total_requests = 0
+        self.bestmove_requests = 0
+        self.multipv_requests = 0
+        self.analyze_requests = 0
+
+        self.cache_hits = 0
+        self.cache_misses = 0
 
         # Queue for Stockfish output
         self.output_queue = Queue()
@@ -171,6 +181,8 @@ class StockfishEngine:
     def bestmove(self, fen: str, depth: int = 18):
 
         with self.lock:
+            self.total_requests += 1
+            self.bestmove_requests += 1
             cache_key = (
                 "bestmove",
                 fen,
@@ -180,13 +192,14 @@ class StockfishEngine:
             cached = self.cache.get(cache_key)
 
             if cached is not None:
+                self.cache_hits += 1
                 print("BESTMOVE CACHE HIT")
 
                 cached = cached.copy()
                 cached["cached"] = True
 
                 return cached
-
+            self.cache_misses += 1
             print("BESTMOVE CACHE MISS")
 
             self.send("ucinewgame")
@@ -247,6 +260,8 @@ class StockfishEngine:
             
     def multipv(self, fen: str, depth: int = 18, multipv: int = 3):
         with self.lock:
+            self.total_requests += 1
+            self.multipv_requests += 1
             cache_key = (
                 "multipv",
                 fen,
@@ -256,13 +271,14 @@ class StockfishEngine:
             cached = self.cache.get(cache_key)
 
             if cached is not None:
+                self.cache_hits += 1
                 print("MULTIPV CACHE HIT")
 
                 cached = cached.copy()
                 cached["cached"] = True
 
                 return cached
-
+            self.cache_misses += 1
             print("MULTIPV CACHE MISS")
             if multipv != self.current_multipv:
                 self.send(f"setoption name MultiPV value {multipv}")
@@ -335,6 +351,8 @@ class StockfishEngine:
         multipv: int = 1,
     ):
         with self.lock:
+            self.total_requests += 1
+            self.analyze_requests += 1
             cache_key = (
                 "analyze",
                 current_fen,
@@ -345,10 +363,12 @@ class StockfishEngine:
             )
             cached = self.cache.get(cache_key)
             if cached is not None:
+                self.cache_hits += 1
                 cached = cached.copy()
                 cached["cached"] = True
                 print("ANALYZE CACHE HIT")
                 return cached
+            self.cache_misses += 1
             print("ANALYZE CACHE MISS")
             # Configure MultiPV for this search
             if multipv != self.current_multipv:
