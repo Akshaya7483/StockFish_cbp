@@ -4,7 +4,7 @@ import threading
 import time
 from queue import Queue, Empty
 ENGINE_TIMEOUT = int(os.getenv("SF_TIMEOUT", "30"))
-
+from utils import win_probability
 class StockfishEngine:
     def __init__(self):
 
@@ -216,6 +216,7 @@ class StockfishEngine:
                         "depth": best_depth,
                         "cp": cp,
                         "mate": mate,
+                        "win_probability": win_probability(cp, mate),
                         "pv": pv
                     }
             
@@ -416,6 +417,10 @@ class StockfishEngine:
                         "requested_depth": depth,
                         "requested_movetime": movetime,
                         "multipv": multipv,
+                        "win_probability": win_probability(
+                            results[1]["cp"],
+                            results[1]["mate"]
+                        ) if 1 in results else None,
                         "analysis": [
                             results[k]
                             for k in sorted(results.keys())
