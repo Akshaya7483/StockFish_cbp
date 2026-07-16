@@ -45,8 +45,18 @@ class StockfishEngine:
     # -------------------------
 
     def send(self, command: str):
-        self.process.stdin.write(command + "\n")
-        self.process.stdin.flush()
+
+        if self.process.poll() is not None:
+            self.restart()
+
+        try:
+            self.process.stdin.write(command + "\n")
+            self.process.stdin.flush()
+
+        except (BrokenPipeError, OSError):
+            self.restart()
+            self.process.stdin.write(command + "\n")
+            self.process.stdin.flush()
 
     def _reader(self):
 
@@ -80,8 +90,9 @@ class StockfishEngine:
     def read_line(self, timeout=ENGINE_TIMEOUT):
 
         if self.process.poll() is not None:
+            self.restart()
             raise RuntimeError(
-                "Stockfish process exited unexpectedly."
+                "Stockfish restarted. Please retry the request."
             )
 
         try:
@@ -101,6 +112,41 @@ class StockfishEngine:
     # -------------------------
     # Engine initialization
     # -------------------------
+        # -------------------------
+    # Restart Engine
+    # -------------------------
+
+    def restart(self):
+        print("Restarting Stockfish...")
+
+        try:
+            if self.process:
+                self.process.kill()
+                self.process.wait(timeout=2)
+        except Exception:
+            pass
+
+        self.output_queue = Queue()
+
+        self.process = subprocess.Popen(
+            [self.engine_path],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        threading.Thread(
+            target=self._reader,
+            daemon=True
+        ).start()
+
+        self.current_multipv = 1
+
+        self.initialize()
+
+        print("Stockfish restarted successfully.")
 
     def initialize(self):
 
