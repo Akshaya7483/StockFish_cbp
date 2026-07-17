@@ -1,14 +1,8 @@
 from cache import AnalysisCache
-import os
-import subprocess
 import threading
-import time
 from utils import win_probability
-from uci_protocol import UCIProtocol
+from engine_manager import EngineManager
 from config import (
-    ENGINE_PATH,
-    THREADS,
-    HASH_MB,
     DEFAULT_MULTIPV,
     DEFAULT_DEPTH,
     FIRST_MOVE_DEPTH,
@@ -18,32 +12,12 @@ from config import (
 class StockfishEngine:
     def __init__(self):
 
-        # Select correct engine depending on OS
-        self.engine_path = ENGINE_PATH
-        if os.name != "nt":
-            os.chmod(self.engine_path, 0o755)
-
-        # Start Stockfish
-        self.process = subprocess.Popen(
-            [self.engine_path],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-
-        self.protocol = UCIProtocol(self.process)
-        self.protocol.restart = self.restart
-
         # Prevent concurrent requests from mixing stdout
         self.lock = threading.Lock()
         self.current_multipv = DEFAULT_MULTIPV
         self.cache = AnalysisCache(max_size=CACHE_SIZE)
 
         # Statistics
-        self.start_time = time.time()
-
         self.total_requests = 0
         self.bestmove_requests = 0
         self.multipv_requests = 0
@@ -52,69 +26,19 @@ class StockfishEngine:
         self.cache_hits = 0
         self.cache_misses = 0
 
-        self.initialize()
+        self.manager = EngineManager(on_restart=self._reset_engine_state)
 
-    # -------------------------
-    # Engine initialization
-    # -------------------------
-        # -------------------------
-    # Restart Engine
-    # -------------------------
-
-    def restart(self):
-        print("Restarting Stockfish...")
-
-        try:
-            if self.process:
-                self.process.kill()
-                self.process.wait(timeout=2)
-        except Exception:
-            pass
-
-        self.process = subprocess.Popen(
-            [self.engine_path],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-        self.protocol.attach_process(self.process)
-
+    def _reset_engine_state(self):
         self.current_multipv = DEFAULT_MULTIPV
 
-        self.initialize()
-
-        print("Stockfish restarted successfully.")
-
-    def initialize(self):
-
-        self.protocol.send("uci")
-        self.protocol.read_until("uciok")
-        self.threads = THREADS
-        self.hash_mb = HASH_MB
-        self.default_multipv = DEFAULT_MULTIPV
-
-        self.protocol.send(f"setoption name Threads value {self.threads}")
-        self.protocol.send(f"setoption name Hash value {self.hash_mb}")
-        self.protocol.send(f"setoption name MultiPV value {self.default_multipv}")
-
-        self.protocol.send("isready")
-        self.protocol.read_until("readyok")
-
     def health(self):
-        running = self.process.poll() is None
+        manager_health = self.manager.health()
+        manager_health["cache_entries"] = len(self.cache.cache)
+        return manager_health
 
-        return {
-            "status": "healthy" if running else "unhealthy",
-            "engine_running": running,
-            "pid": self.process.pid if running else None,
-            "threads": self.threads,
-            "hash_mb": self.hash_mb,
+    def stop(self):
+        self.manager.stop()
 
-            "cache_entries": len(self.cache.cache),
-            "uptime_seconds": int(time.time() - self.start_time),
-        }
     # -------------------------
     # Best Move
     # -------------------------
@@ -143,9 +67,9 @@ class StockfishEngine:
             self.cache_misses += 1
             print("BESTMOVE CACHE MISS")
 
-            self.protocol.send("ucinewgame")
-            self.protocol.send(f"position fen {fen}")
-            self.protocol.send(f"go depth {depth}")
+            self.manager.protocol.send("ucinewgame")
+            self.manager.protocol.send(f"position fen {fen}")
+            self.manager.protocol.send(f"go depth {depth}")
 
             cp = None
             mate = None
@@ -155,7 +79,7 @@ class StockfishEngine:
 
             while True:
 
-                line = self.protocol.read_line()
+                line = self.manager.protocol.read_line()
 
                 if line.startswith("info"):
 
@@ -222,16 +146,16 @@ class StockfishEngine:
             self.cache_misses += 1
             print("MULTIPV CACHE MISS")
             if multipv != self.current_multipv:
-                self.protocol.send(f"setoption name MultiPV value {multipv}")
-                self.protocol.send("isready")
-                self.protocol.read_until("readyok")
+                self.manager.protocol.send(f"setoption name MultiPV value {multipv}")
+                self.manager.protocol.send("isready")
+                self.manager.protocol.read_until("readyok")
                 self.current_multipv = multipv
-            self.protocol.send("ucinewgame")
-            self.protocol.send(f"position fen {fen}")
-            self.protocol.send(f"go depth {depth}")
+            self.manager.protocol.send("ucinewgame")
+            self.manager.protocol.send(f"position fen {fen}")
+            self.manager.protocol.send(f"go depth {depth}")
             results = {}
             while True:
-                line = self.protocol.read_line()
+                line = self.manager.protocol.read_line()
                 if line.startswith("info"):
                     parts = line.split()
                     if "multipv" not in parts:
@@ -313,24 +237,24 @@ class StockfishEngine:
             print("ANALYZE CACHE MISS")
             # Configure MultiPV for this search
             if multipv != self.current_multipv:
-                self.protocol.send(f"setoption name MultiPV value {multipv}")
-                self.protocol.send("isready")
-                self.protocol.read_until("readyok")
+                self.manager.protocol.send(f"setoption name MultiPV value {multipv}")
+                self.manager.protocol.send("isready")
+                self.manager.protocol.read_until("readyok")
                 self.current_multipv = multipv
-            self.protocol.send("ucinewgame")
-            self.protocol.send(f"position fen {current_fen}")
+            self.manager.protocol.send("ucinewgame")
+            self.manager.protocol.send(f"position fen {current_fen}")
             if movetime is not None:
-                self.protocol.send(f"go movetime {movetime}")
+                self.manager.protocol.send(f"go movetime {movetime}")
             else:
                 go_command = "go"
                 if depth is not None:
                     go_command += f" depth {depth}"
                 if movetime is not None:
                     go_command += f" movetime {movetime}"
-                self.protocol.send(go_command)
+                self.manager.protocol.send(go_command)
             results = {}
             while True:
-                line = self.protocol.read_line()
+                line = self.manager.protocol.read_line()
                 if line.startswith("info"):
                     parts = line.split()
                     if "multipv" not in parts:
@@ -380,14 +304,14 @@ class StockfishEngine:
                         ponder = parts[parts.index("ponder") + 1]
                     previous_bestmove = None
                     if previous_fen:
-                        self.protocol.send("ucinewgame")
-                        self.protocol.send(f"position fen {previous_fen}")
+                        self.manager.protocol.send("ucinewgame")
+                        self.manager.protocol.send(f"position fen {previous_fen}")
                         if movetime is not None:
-                            self.protocol.send(f"go movetime {movetime}")
+                            self.manager.protocol.send(f"go movetime {movetime}")
                         else:
-                            self.protocol.send(f"go depth {depth or DEFAULT_DEPTH}")
+                            self.manager.protocol.send(f"go depth {depth or DEFAULT_DEPTH}")
                         while True:
-                            prev = self.protocol.read_line()
+                            prev = self.manager.protocol.read_line()
                             if prev.startswith("bestmove"):
                                 prev_parts = prev.split()
                                 previous_bestmove = prev_parts[1]
@@ -432,16 +356,16 @@ class StockfishEngine:
         """
         Evaluate the position after making one move.
         """
-        self.protocol.send("ucinewgame")
-        self.protocol.send(f"position fen {fen} moves {move}")
+        self.manager.protocol.send("ucinewgame")
+        self.manager.protocol.send(f"position fen {fen} moves {move}")
         if movetime is not None:
-            self.protocol.send(f"go movetime {movetime}")
+            self.manager.protocol.send(f"go movetime {movetime}")
         else:
-            self.protocol.send(f"go depth {depth or DEFAULT_DEPTH}")
+            self.manager.protocol.send(f"go depth {depth or DEFAULT_DEPTH}")
         cp = None
         mate = None
         while True:
-            line = self.protocol.read_line()
+            line = self.manager.protocol.read_line()
             if line.startswith("info"):
                 parts = line.split()
                 if "score" in parts:
@@ -458,7 +382,7 @@ class StockfishEngine:
    
     def stats(self):
 
-        uptime = int(time.time() - self.start_time)
+        health = self.manager.health()
 
         total_cache = self.cache_hits + self.cache_misses
 
@@ -470,10 +394,10 @@ class StockfishEngine:
         return {
             "status": "online",
             "engine": "Stockfish 18.1",
-            "uptime_seconds": uptime,
-            "threads": self.threads,
-            "hash_mb": self.hash_mb,
-            "default_multipv": self.default_multipv,
+            "uptime_seconds": health["uptime_seconds"],
+            "threads": health["threads"],
+            "hash_mb": health["hash_mb"],
+            "default_multipv": self.manager.default_multipv,
 
 
             "requests": {
@@ -490,10 +414,3 @@ class StockfishEngine:
                 "hit_rate": hit_rate
             }
         }
-    # -------------------------
-    # Shutdown
-    # -------------------------
-
-    def stop(self):
-        self.protocol.send("quit")
-        self.process.terminate()
