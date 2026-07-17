@@ -4,18 +4,24 @@ import subprocess
 import threading
 import time
 from queue import Queue, Empty
-ENGINE_TIMEOUT = int(os.getenv("SF_TIMEOUT", "30"))
 from utils import win_probability
-FIRST_MOVE_DEPTH = 10
-FIRST_MOVE_TIME = 200
+from config import (
+    ENGINE_PATH,
+    THREADS,
+    HASH_MB,
+    DEFAULT_MULTIPV,
+    DEFAULT_DEPTH,
+    FIRST_MOVE_DEPTH,
+    FIRST_MOVE_TIME,
+    CACHE_SIZE,
+    ENGINE_TIMEOUT,
+)
 class StockfishEngine:
     def __init__(self):
 
         # Select correct engine depending on OS
-        if os.name == "nt":
-            self.engine_path = "./stockfish-windows-x86-64-avx2.exe"
-        else:
-            self.engine_path = "./stockfish/stockfish-ubuntu-x86-64-avx2"
+        self.engine_path = ENGINE_PATH
+        if os.name != "nt":
             os.chmod(self.engine_path, 0o755)
 
         # Start Stockfish
@@ -30,8 +36,9 @@ class StockfishEngine:
 
         # Prevent concurrent requests from mixing stdout
         self.lock = threading.Lock()
-        self.current_multipv = 1
-        self.cache = AnalysisCache(max_size=500)
+        self.current_multipv = DEFAULT_MULTIPV
+        self.cache = AnalysisCache(max_size=CACHE_SIZE)
+
         # Statistics
         self.start_time = time.time()
 
@@ -158,7 +165,7 @@ class StockfishEngine:
             daemon=True
         ).start()
 
-        self.current_multipv = 1
+        self.current_multipv = DEFAULT_MULTIPV
 
         self.initialize()
 
@@ -168,9 +175,9 @@ class StockfishEngine:
 
         self.send("uci")
         self.read_until("uciok")
-        self.threads = 1
-        self.hash_mb = 256
-        self.default_multipv = 1
+        self.threads = THREADS
+        self.hash_mb = HASH_MB
+        self.default_multipv = DEFAULT_MULTIPV
 
         self.send(f"setoption name Threads value {self.threads}")
         self.send(f"setoption name Hash value {self.hash_mb}")
@@ -196,7 +203,7 @@ class StockfishEngine:
     # Best Move
     # -------------------------
 
-    def bestmove(self, fen: str, depth: int = 18):
+    def bestmove(self, fen: str, depth: int = DEFAULT_DEPTH):
 
         with self.lock:
             self.total_requests += 1
@@ -276,7 +283,7 @@ class StockfishEngine:
                     self.cache.set(cache_key, response)
                     return response
             
-    def multipv(self, fen: str, depth: int = 18, multipv: int = 3):
+    def multipv(self, fen: str, depth: int = DEFAULT_DEPTH, multipv: int = 3):
         with self.lock:
             self.total_requests += 1
             self.multipv_requests += 1
@@ -366,7 +373,7 @@ class StockfishEngine:
         previous_fen: str | None = None,
         depth: int | None = None,
         movetime: int | None = None,
-        multipv: int = 1,
+        multipv: int = DEFAULT_MULTIPV,
     ):
         with self.lock:
             self.total_requests += 1
@@ -462,7 +469,7 @@ class StockfishEngine:
                         if movetime is not None:
                             self.send(f"go movetime {movetime}")
                         else:
-                            self.send(f"go depth {depth or 18}")
+                            self.send(f"go depth {depth or DEFAULT_DEPTH}")
                         while True:
                             prev = self.read_line()
                             if prev.startswith("bestmove"):
@@ -514,7 +521,7 @@ class StockfishEngine:
         if movetime is not None:
             self.send(f"go movetime {movetime}")
         else:
-            self.send(f"go depth {depth or 18}")
+            self.send(f"go depth {depth or DEFAULT_DEPTH}")
         cp = None
         mate = None
         while True:

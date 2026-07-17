@@ -1,4 +1,5 @@
 import io
+from time import perf_counter
 from datetime import datetime, timezone
 import chess
 import chess.pgn
@@ -26,7 +27,11 @@ class GameAnalyzer:
 
         No review logic (accuracy, blunders, CPL, etc.)
         """
+        # ------------------------------------
+        # Overall Execution Timer
+        # ------------------------------------
 
+        overall_start = perf_counter()
         game = chess.pgn.read_game(io.StringIO(pgn))
 
         if game is None:
@@ -228,11 +233,16 @@ class GameAnalyzer:
             before_analysis = after_analysis
 
         average_analysis_time_ms = (
-        round(total_analysis_time_ms / positions_analyzed)
-        if positions_analyzed
-        else 0
-    )
-        
+            round(total_analysis_time_ms / positions_analyzed)
+            if positions_analyzed
+            else 0
+        )
+
+        overall_execution_time_ms = round(
+            (perf_counter() - overall_start) * 1000,
+            2
+        )
+
         return {
 
             # ---------------------------------
@@ -255,16 +265,31 @@ class GameAnalyzer:
 
             "analysis_summary": {
 
+                # ---------------------------------
+                # Engine Statistics
+                # ---------------------------------
+
                 "positions_analyzed": positions_analyzed,
 
-                "total_analysis_time_ms": total_analysis_time_ms,
+                "engine_analysis_time_ms": total_analysis_time_ms,
 
-                "total_analysis_time_seconds": round(
+                "engine_analysis_time_seconds": round(
                     total_analysis_time_ms / 1000,
                     2,
                 ),
 
                 "average_analysis_time_ms": average_analysis_time_ms,
+
+                # ---------------------------------
+                # End-to-End Execution
+                # ---------------------------------
+
+                "total_execution_time_ms": overall_execution_time_ms,
+
+                "total_execution_time_seconds": round(
+                    overall_execution_time_ms / 1000,
+                    2,
+                ),
 
             },
 
