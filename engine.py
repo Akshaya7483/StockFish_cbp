@@ -3,6 +3,7 @@ import threading
 from utils import win_probability
 from engine_manager import EngineManager
 from analysis_service import AnalysisService
+from search_service import SearchService
 from config import (
     DEFAULT_MULTIPV,
     DEFAULT_DEPTH,
@@ -26,13 +27,16 @@ class StockfishEngine:
         self.cache_misses = 0
 
         self.manager = EngineManager(on_restart=self._reset_engine_state)
-        self.analysis_service = AnalysisService(
+        self.search_service = SearchService(
             manager=self.manager,
+            get_current_multipv=lambda: self.current_multipv,
+            set_current_multipv=self._set_current_multipv,
+        )
+        self.analysis_service = AnalysisService(
+            search_service=self.search_service,
             cache=self.cache,
             lock=self.lock,
             evaluate_first_move=self.evaluate_first_move,
-            get_current_multipv=lambda: self.current_multipv,
-            set_current_multipv=self._set_current_multipv,
             on_request=self._record_analyze_request,
             on_cache_hit=self._record_cache_hit,
             on_cache_miss=self._record_cache_miss,
@@ -90,61 +94,20 @@ class StockfishEngine:
             self.cache_misses += 1
             print("BESTMOVE CACHE MISS")
 
-            self.manager.protocol.send("ucinewgame")
-            self.manager.protocol.send(f"position fen {fen}")
-            self.manager.protocol.send(f"go depth {depth}")
+            result = self.search_service.search_bestmove(fen, depth)
 
-            cp = None
-            mate = None
-            pv = []
-
-            best_depth = 0
-
-            while True:
-
-                line = self.manager.protocol.read_line()
-
-                if line.startswith("info"):
-
-                    parts = line.split()
-
-                    if "depth" in parts:
-
-                        current_depth = int(parts[parts.index("depth") + 1])
-
-                        if current_depth >= best_depth:
-
-                            best_depth = current_depth
-
-                            if "score" in parts:
-
-                                idx = parts.index("score")
-                                if parts[idx + 1] == "cp":
-                                    cp = int(parts[idx + 2])
-                                elif parts[idx + 1] == "mate":
-                                    mate = int(parts[idx + 2])
-                            if "pv" in parts:
-                                pv_index = parts.index("pv")
-                                pv = parts[pv_index + 1:]
-                elif line.startswith("bestmove"):
-                    parts = line.split()
-                    bestmove = parts[1]
-                    ponder = None
-                    if "ponder" in parts:
-                        ponder = parts[parts.index("ponder") + 1]
-                        
-                    response = {
-                        "bestmove": bestmove,
-                        "ponder": ponder,
-                        "depth": best_depth,
-                        "cp": cp,
-                        "mate": mate,
-                        "win_probability": win_probability(cp, mate),
-                        "pv": pv,
-                        "cached": False
-                    }
-                    self.cache.set(cache_key, response)
-                    return response
+            response = {
+                "bestmove": result["bestmove"],
+                "ponder": result["ponder"],
+                "depth": result["depth"],
+                "cp": result["cp"],
+                "mate": result["mate"],
+                "win_probability": win_probability(result["cp"], result["mate"]),
+                "pv": result["pv"],
+                "cached": False
+            }
+            self.cache.set(cache_key, response)
+            return response
             
     def multipv(self, fen: str, depth: int = DEFAULT_DEPTH, multipv: int = 3):
         with self.lock:
@@ -168,67 +131,22 @@ class StockfishEngine:
                 return cached
             self.cache_misses += 1
             print("MULTIPV CACHE MISS")
-            if multipv != self.current_multipv:
-                self.manager.protocol.send(f"setoption name MultiPV value {multipv}")
-                self.manager.protocol.send("isready")
-                self.manager.protocol.read_until("readyok")
-                self.current_multipv = multipv
-            self.manager.protocol.send("ucinewgame")
-            self.manager.protocol.send(f"position fen {fen}")
-            self.manager.protocol.send(f"go depth {depth}")
-            results = {}
-            while True:
-                line = self.manager.protocol.read_line()
-                if line.startswith("info"):
-                    parts = line.split()
-                    if "multipv" not in parts:
-                        continue
-                    rank = int(parts[parts.index("multipv") + 1])
-                    if rank not in results:
-                        results[rank] = {
-                            "rank": rank,
-                            "cp": None,
-                            "mate": None,
-                            "pv": [],
-                            "depth": 0
-                        }
-                    if "depth" in parts:
-                        results[rank]["depth"] = int(parts[parts.index("depth") + 1])
-                    if "score" in parts:
-                        idx = parts.index("score")
-                        if parts[idx + 1] == "cp":
-                            results[rank]["cp"] = int(parts[idx + 2])
-                        elif parts[idx + 1] == "mate":
-                            results[rank]["mate"] = int(parts[idx + 2])
 
-                    if "pv" in parts:
-                        pv_index = parts.index("pv")
-                        pv = parts[pv_index + 1:]
-                        results[rank]["pv"] = pv
-                        if len(pv):
-                            results[rank]["bestmove"] = pv[0]
+            result = self.search_service.search_multipv(fen, depth, multipv)
 
-                elif line.startswith("bestmove"):
-                    parts = line.split()
-                    bestmove = parts[1]
-                    ponder = None
-
-                    if "ponder" in parts:
-                        ponder = parts[parts.index("ponder") + 1]
-
-                    response = {
-                        "bestmove": bestmove,
-                        "ponder": ponder,
-                        "depth": depth,
-                        "multipv": multipv,
-                        "moves": [
-                            results[k]
-                            for k in sorted(results.keys())
-                        ],
-                        "cached": False
-                    }
-                    self.cache.set(cache_key, response)
-                    return response
+            response = {
+                "bestmove": result["bestmove"],
+                "ponder": result["ponder"],
+                "depth": depth,
+                "multipv": multipv,
+                "moves": [
+                    result["results"][k]
+                    for k in sorted(result["results"].keys())
+                ],
+                "cached": False
+            }
+            self.cache.set(cache_key, response)
+            return response
     
     def analyze(
         self,
@@ -256,29 +174,12 @@ class StockfishEngine:
         """
         Evaluate the position after making one move.
         """
-        self.manager.protocol.send("ucinewgame")
-        self.manager.protocol.send(f"position fen {fen} moves {move}")
-        if movetime is not None:
-            self.manager.protocol.send(f"go movetime {movetime}")
-        else:
-            self.manager.protocol.send(f"go depth {depth or DEFAULT_DEPTH}")
-        cp = None
-        mate = None
-        while True:
-            line = self.manager.protocol.read_line()
-            if line.startswith("info"):
-                parts = line.split()
-                if "score" in parts:
-                    idx = parts.index("score")
-                    if parts[idx + 1] == "cp":
-                        cp = int(parts[idx + 2])
-                    elif parts[idx + 1] == "mate":
-                        mate = int(parts[idx + 2])
-            elif line.startswith("bestmove"):
-                return {
-                    "cp": cp,
-                    "mate": mate
-                }
+        return self.search_service.evaluate_position_after_move(
+            fen,
+            move,
+            depth=depth,
+            movetime=movetime,
+        )
    
     def stats(self):
 
