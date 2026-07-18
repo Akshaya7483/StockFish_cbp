@@ -15,7 +15,7 @@ else:
 
 THREADS = int(os.getenv("SF_THREADS", "1"))
 
-HASH_MB = int(os.getenv("SF_HASH_MB", "256"))
+HASH_MB = int(os.getenv("SF_HASH_MB", "128"))
 
 DEFAULT_MULTIPV = int(os.getenv("SF_MULTIPV", "1"))
 
@@ -39,7 +39,7 @@ CACHE_SIZE = int(os.getenv("SF_CACHE_SIZE", "500"))
 # Engine Pool
 # ============================
 
-POOL_SIZE = int(os.getenv("SF_POOL_SIZE", "2"))
+POOL_SIZE = int(os.getenv("SF_POOL_SIZE", "1"))
 
 # ============================
 # Candidate Detection
