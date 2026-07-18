@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
-from engine import StockfishEngine
+from engine_pool import EnginePool
 from validators import validate_request
 from game_analyzer import GameAnalyzer
+from game_analysis_pipeline import GameAnalysisPipeline
 from models import (
     BestMoveRequest,
     MultiPVRequest,
@@ -11,8 +12,10 @@ from models import (
 
 app = FastAPI()
 
-engine = StockfishEngine()
-game_analyzer = GameAnalyzer(engine)
+engine_pool = EnginePool()
+
+game_analysis_pipeline = GameAnalysisPipeline()
+game_analyzer = GameAnalyzer(game_analysis_pipeline)
 
 # -------------------------------------
 # Engine Call Wrapper
@@ -73,11 +76,15 @@ def best_move(req: BestMoveRequest):
         depth=req.depth
     )
 
-    return engine_call(
-        engine.bestmove,
-        req.fen,
-        req.depth
-    )
+    engine = engine_pool.acquire()
+    try:
+        return engine_call(
+            engine.bestmove,
+            req.fen,
+            req.depth
+        )
+    finally:
+        engine_pool.release(engine)
 
 
 # -------------------------------------
@@ -93,12 +100,16 @@ def multipv(req: MultiPVRequest):
         multipv=req.multipv
     )
 
-    return engine_call(
-        engine.multipv,
-        req.fen,
-        req.depth,
-        req.multipv
-    )
+    engine = engine_pool.acquire()
+    try:
+        return engine_call(
+            engine.multipv,
+            req.fen,
+            req.depth,
+            req.multipv
+        )
+    finally:
+        engine_pool.release(engine)
 
 
 # -------------------------------------
@@ -115,30 +126,48 @@ def analyze(req: AnalyzeRequest):
         movetime=req.movetime
     )
 
-    return engine_call(
-        engine.analyze,
-        current_fen=req.current_fen,
-        previous_fen=req.previous_fen,
-        depth=req.depth,
-        movetime=req.movetime,
-        multipv=req.multipv,
-    )
+    engine = engine_pool.acquire()
+    try:
+        return engine_call(
+            engine.analyze,
+            current_fen=req.current_fen,
+            previous_fen=req.previous_fen,
+            depth=req.depth,
+            movetime=req.movetime,
+            multipv=req.multipv,
+        )
+    finally:
+        engine_pool.release(engine)
 
 @app.get("/stats")
 def stats():
-    return engine.stats()
+    return engine_pool.stats()
 
 @app.get("/health")
 def health():
-    return engine.health()
+    return engine_pool.health()
 
 @app.post("/analyze-game")
 def analyze_game(req: AnalyzeGameRequest):
 
-    return engine_call(
-        game_analyzer.analyze_game,
-        pgn=req.pgn,
-        depth=req.depth,
-        movetime=req.movetime,
-        multipv=req.multipv,
-    )
+    engine = engine_pool.acquire()
+    try:
+        return engine_call(
+            game_analyzer.analyze_game,
+            engine,
+            req.pgn,
+            depth=req.depth,
+            movetime=req.movetime,
+            multipv=req.multipv,
+        )
+    finally:
+        engine_pool.release(engine)
+
+
+# -------------------------------------
+# Shutdown
+# -------------------------------------
+
+@app.on_event("shutdown")
+def shutdown_event():
+    engine_pool.shutdown()
